@@ -1,0 +1,186 @@
+import streamlit as st
+import requests
+import openai
+import os
+from openpyxl import load_workbook, Workbook
+
+# Set API Keys
+SERP_API_KEY = os.getenv("SERP_API_KEY", "4e6f3a903a9e01c158c3fb24791ea75d73aac1122756d86c5d3884150f9151fc")
+openai.api_key = os.getenv("OPENAI_API_KEY", "sk-...")  # Optional but used for GPT
+
+# API endpoint
+API_BASE = os.getenv("API_URL", "http://localhost:8000")
+
+# Set Excel file path for logging user data
+excel_path = "fundwise_logins.xlsx"
+
+# --------------------- Ensure Excel file exists --------------------- #
+if not os.path.exists(excel_path):
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Logins"
+    ws.append(["Email", "UID", "Type"])
+    wb.save(excel_path)
+
+# --------------------- Streamlit UI Setup --------------------- #
+st.set_page_config(page_title="FundWise Network", layout="centered")
+st.title("🚀 FundWise Network")
+st.subheader("Fundraising & Community Building Platform")
+
+menu = st.sidebar.selectbox("Choose Panel", ["Login", "Fundraiser", "Investor", "AI Estimator", "Community"])
+
+# ---------------------- Authentication ---------------------- #
+if menu == "Login":
+    st.header("🔐 Login or Register")
+    email = st.text_input("Email")
+    user_type = st.radio("I am an...", ["Investor", "Fundraiser"])
+    uid = st.text_input("Your Unique ID")
+    login_btn = st.button("Login")
+
+    if login_btn:
+        # Store user data in session
+        st.session_state.user = {"email": email, "uid": uid, "type": user_type}
+        st.success(f"Logged in as {user_type} - {email}")
+
+        # ---------------------- Save login to Excel ---------------------- #
+        wb = load_workbook(excel_path)
+        ws = wb["Logins"]
+        ws.append([email, uid, user_type])
+        wb.save(excel_path)
+
+# ---------------------- Fundraiser Panel ---------------------- #
+elif menu == "Fundraiser":
+    st.header("📤 Submit Fundraising Request")
+    if "user" not in st.session_state or st.session_state.user["type"] != "Fundraiser":
+        st.warning("Please log in as a Fundraiser from the Login tab.")
+    else:
+        with st.form("fundraiser_form"):
+            name = st.text_input("Company Name")
+            domain = st.text_input("Domain")
+            is_new = st.radio("Is this a new company?", ["Yes", "No"])
+            reason = st.text_area("Reason for Fundraising")
+            quote = st.number_input("Quote Amount (₹)", min_value=0.0)
+            equity = st.slider("Equity Offered (%)", 0.0, 100.0)
+            category = st.selectbox("Funding Category", ["event", "company", "project"])
+            stage = st.selectbox("Funding Stage", ["pre", "post"])
+            location = st.text_input("Location (Optional)")
+            submitted = st.form_submit_button("Submit Request")
+
+            if submitted:
+                payload = {
+                    "name": name,
+                    "domain": domain,
+                    "is_new_company": is_new == "Yes",
+                    "reason": reason,
+                    "quote_amount": quote,
+                    "equity_offered": equity,
+                    "category": category,
+                    "funding_stage": stage,
+                    "location": location,
+                }
+                st.success("Fundraising request saved locally (no backend used).")
+                st.write("📁 Submission Summary:", payload)
+
+# ---------------------- Investor Panel ---------------------- #
+elif menu == "Investor":
+    st.header("💼 Set Investor Preferences")
+    if "user" not in st.session_state or st.session_state.user["type"] != "Investor":
+        st.warning("Please log in as an Investor from the Login tab.")
+    else:
+        with st.form("investor_form"):
+            investor_id = st.text_input("Investor ID")
+            categories = st.multiselect("Preferred Categories", ["event", "company", "project"])
+            min_investment = st.number_input("Minimum Investment (₹)", min_value=0.0)
+            max_investment = st.number_input("Maximum Investment (₹)", min_value=0.0)
+            max_equity = st.slider("Max Equity Willing to Accept (%)", 0.0, 100.0)
+            location = st.text_input("Location (Optional)")
+            save = st.form_submit_button("Save Preferences")
+
+            if save:
+                prefs = {
+                    "investor_id": investor_id,
+                    "preferred_categories": categories,
+                    "min_investment": min_investment,
+                    "max_investment": max_investment,
+                    "max_equity": max_equity,
+                    "location": location
+                }
+                st.success("Preferences saved locally (no backend used).")
+                st.write("📁 Preferences Summary:", prefs)
+# ---------------------- AI Estimator ---------------------- #
+# ---------------------- AI Estimator (Valuation Suggestion) ---------------------- #
+elif menu == "AI Estimator":
+    st.header("🤖 AI Fund Estimation & Valuation Advisor")
+    with st.form("ai_estimator"):
+        company_name = st.text_input("Company Name")
+        domain = st.text_input("Domain/Industry")
+        reason = st.text_area("Reason for Fundraising")
+        quote = st.number_input("Expected Quote (₹)", min_value=0.0)
+        equity = st.slider("Equity to Offer (%)", 0.0, 100.0)
+        estimate = st.form_submit_button("Estimate")
+
+        if estimate:
+            try:
+                # ----- Valuation Estimation Logic -----
+                if equity == 0:
+                    st.warning("Equity offered must be greater than 0% to estimate valuation.")
+                else:
+                    implied_valuation = quote * 100 / equity
+                    st.markdown(f"### 📊 Estimated Company Valuation: ₹{implied_valuation:,.2f}")
+
+                    # Feedback based on implied valuation
+                    if implied_valuation < 5000000:
+                        comment = "Valuation seems quite conservative. Could attract more investors."
+                    elif implied_valuation <= 10000000:
+                        comment = "Valuation is within a moderate range. Adjust equity to improve appeal."
+                    else:
+                        comment = "High valuation detected. Ensure strong metrics to justify it."
+
+                    st.markdown(f"**💡 Recommendation:** {comment}")
+
+                # Optional: Add SerpAPI-based insights (as before)
+                params = {
+                    "q": f"{company_name} {domain} startup funding success rate",
+                    "api_key": SERP_API_KEY,
+                    "engine": "google"
+                }
+                serp_response = requests.get("https://serpapi.com/search", params=params)
+                data = serp_response.json()
+                snippets = [item["snippet"] for item in data.get("organic_results", []) if "snippet" in item]
+
+                if snippets:
+                    st.markdown("### 🔍 SerpAPI Insights:")
+                    for s in snippets[:3]:
+                        st.markdown(f"- {s}")
+                else:
+                    st.info("No external insights found. Try a different domain.")
+
+            except Exception as e:
+                st.error(f"Estimation Error: {e}")
+
+
+# ---------------------- Community ---------------------- #
+elif menu == "Community":
+    st.header("🌍 Community Forum - Powered by SerpAPI")
+    st.info("Get external advice and public insights from the web.")
+
+    try:
+        params = {
+            "q": "startup community forum fundraising advice",
+            "api_key": SERP_API_KEY,
+            "engine": "google"
+        }
+        serp_response = requests.get("https://serpapi.com/search", params=params)
+        data = serp_response.json()
+
+        if "organic_results" in data:
+            st.markdown("### 🔎 Top Forum Discussions:")
+            for res in data["organic_results"][:5]:
+                title = res.get("title", "Untitled")
+                link = res.get("link", "#")
+                snippet = res.get("snippet", "")
+                st.markdown(f"- [{title}]({link})\n> {snippet}")
+        else:
+            st.info("No forum discussions found.")
+    except Exception as e:
+        st.error(f"Error fetching community data: {e}")
